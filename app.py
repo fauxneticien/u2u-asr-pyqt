@@ -7,6 +7,8 @@ from PyQt5.QtCore import pyqtSignal, QObject, QThread
 import os
 from time import sleep
 
+from pedalboard.io import AudioFile
+
 # Worker class to process the file in a separate thread
 class WordCountWorker(QObject):
     progress = pyqtSignal(int)          # Signal to update progress bar
@@ -19,36 +21,34 @@ class WordCountWorker(QObject):
     def run(self):
         results = []                    # Store word counts for each line
         try:
-            with open(self.filepath, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-                total_lines = len(lines)
+            with AudioFile(self.filepath).resampled_to(16_000) as f:
+                wav = f.read(f.frames)
 
-                for i, line in enumerate(lines):
-                    word_count = len(line.strip().split())  # Count words in line
-                    results.append(f"Line {i + 1}: {word_count} words")
-                    progress_percent = int((i + 1) / total_lines * 100)
-                    self.progress.emit(progress_percent)     # Update progress bar
+            for i in range(10):
+                progress_percent = int((i+1) * 10)
+                self.progress.emit(progress_percent)     # Update progress bar
 
-                    # Add delay to see progress bar
-                    sleep(1)
+                # Add delay to see progress bar
+                sleep(1)
+
+            results.append(f"{wav.shape}")
 
         except Exception as e:
             results = [f"Error reading file: {str(e)}"]
         self.finished.emit(results)     # Emit final results when done
 
-
 # Main application window
 class WordCountApp(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Word Count per Line with Progress")
+        self.setWindowTitle("Mixtec wav-to-eaf")
         self.setGeometry(200, 200, 500, 150)
 
         # UI Components
         layout = QVBoxLayout()
-        self.label = QLabel("Select a text file to begin")
+        self.label = QLabel("Select a wav file to begin")
         self.progress_bar = QProgressBar()
-        self.select_button = QPushButton("Select Text File")
+        self.select_button = QPushButton("Select .wav File")
 
         # Add widgets to layout
         layout.addWidget(self.label)
@@ -61,7 +61,7 @@ class WordCountApp(QWidget):
 
     def select_file(self):
         # Open file dialog to choose a text file
-        filepath, _ = QFileDialog.getOpenFileName(self, "Open Text File", "", "Text Files (*.txt)")
+        filepath, _ = QFileDialog.getOpenFileName(self, "Open wav File", "", "Wav Files (*.wav)")
         if filepath:
             self.label.setText(f"Processing file: {os.path.basename(filepath)}")
             self.run_worker(filepath)
@@ -99,7 +99,7 @@ class WordCountApp(QWidget):
         else:
             QMessageBox.warning(self, "Canceled", "Save operation was canceled.")
 
-        self.label.setText("Select a text file to begin")
+        self.label.setText("Select a wav file to begin")
         self.progress_bar.setValue(0)
 
 
