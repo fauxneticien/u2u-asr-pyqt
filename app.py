@@ -5,37 +5,60 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import pyqtSignal, QObject, QThread
 import os
-from time import sleep
 
+import numpy as np
 from pedalboard.io import AudioFile
+from silero_vad import SileroVAD
+from mhubert_asr import mHuBERTASR
+from pympi import Elan
+
+basedir = os.path.dirname(__file__)
 
 # Worker class to process the file in a separate thread
 class WordCountWorker(QObject):
     progress = pyqtSignal(int)          # Signal to update progress bar
     finished = pyqtSignal(list)         # Signal to emit result when done
 
-    def __init__(self, filepath):
+    def __init__(self, filepath, vad_model, asr_model):
         super().__init__()
         self.filepath = filepath        # Path of file to be processed
 
+        self.vad_model = vad_model
+        self.asr_model = asr_model
+
     def run(self):
-        results = []                    # Store word counts for each line
         try:
             with AudioFile(self.filepath).resampled_to(16_000) as f:
                 wav = f.read(f.frames)
 
-            for i in range(10):
-                progress_percent = int((i+1) * 10)
-                self.progress.emit(progress_percent)     # Update progress bar
+                if wav.shape[0] != 1:
+                    wav = np.mean(wav, axis=0, keepdims=True)
 
-                # Add delay to see progress bar
-                sleep(1)
+            speech_timestamps = self.vad_model.get_speech_timestamps(
+                wav,
+                progress_tracking_callback=lambda x: self.progress.emit(x)
+            )
 
-            results.append(f"{wav.shape}")
+            speech_timestamps_with_text = self.asr_model.predict_text(
+                wav,
+                speech_timestamps,
+                progress_tracking_callback=lambda x: self.progress.emit(x)
+            )
+
+            eaf_data = Elan.Eaf()
+            eaf_data.add_linked_file(self.filepath)
+            # Remove 'default' tier from newly created eaf object
+            eaf_data.remove_tier('default')
+            eaf_data.add_tier(f"Channel 0")
+
+            for a in speech_timestamps_with_text:
+                start_ms = int(a["start"] / 16)
+                end_ms   = int(a["end"] / 16)
+                eaf_data.add_annotation(f"Channel 0", start=start_ms, end=end_ms, value=a["text"])
 
         except Exception as e:
             results = [f"Error reading file: {str(e)}"]
-        self.finished.emit(results)     # Emit final results when done
+        self.finished.emit([ eaf_data ])     # Emit final results when done
 
 # Main application window
 class WordCountApp(QWidget):
@@ -49,6 +72,9 @@ class WordCountApp(QWidget):
         self.label = QLabel("Select a wav file to begin")
         self.progress_bar = QProgressBar()
         self.select_button = QPushButton("Select .wav File")
+
+        self.vad_model = SileroVAD(basedir + "/assets/silero_vad.onnx")
+        self.asr_model = mHuBERTASR(basedir + "/assets/mhubert_asr.onnx")
 
         # Add widgets to layout
         layout.addWidget(self.label)
@@ -73,7 +99,7 @@ class WordCountApp(QWidget):
 
         # Set up worker and thread
         self.thread = QThread()
-        self.worker = WordCountWorker(filepath)
+        self.worker = WordCountWorker(filepath, self.vad_model, self.asr_model)
         self.worker.moveToThread(self.thread)
 
         # Connect signals
@@ -88,11 +114,10 @@ class WordCountApp(QWidget):
 
     def on_finished(self, results):
         # Let user choose where to save the output
-        save_path, _ = QFileDialog.getSaveFileName(self, "Save Output File", "", "Text Files (*.txt)")
+        save_path, _ = QFileDialog.getSaveFileName(self, "Save Output File", "", "ELAN Files (*.eaf)")
         if save_path:
             try:
-                with open(save_path, 'w', encoding='utf-8') as f:
-                    f.write("\n".join(results))
+                results[0].to_file(save_path)
                 QMessageBox.information(self, "Success", "Output saved successfully.")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Could not save file: {e}")

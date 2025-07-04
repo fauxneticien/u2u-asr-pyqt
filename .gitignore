@@ -1,1 +1,6 @@
 __pycache__
+packenv/
+assets/
+dist/
+build/
+.DS_Store
