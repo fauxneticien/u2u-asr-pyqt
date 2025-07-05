@@ -11,6 +11,8 @@ Experimental PyQt interface for packaging and deploying an ASR model on a user's
 
 ## Setup
 
+### macOS/Linux
+
 ```bash
 python -m venv packenv
 source packenv/bin/activate
@@ -22,5 +24,22 @@ packenv/bin/pyinstaller \
 	--onedir \
 	--add-data="assets/silero_vad.onnx:assets" \
 	--add-data="assets/mhubert_asr.onnx:assets" \
+	app.py
+```
+
+### Windows
+
+Unlike macOS/Linux, the build process for Windows turned out to be extremely finicky with version requirements (combination below seems to be working as of July 4, 2025).
+
+```
+conda install -n packenv python=3.10
+conda activate packenv
+pip3 install PyQt5 PyInstaller pedalboard==0.9.6 numpy==1.26.4 onnxruntime==1.14.0 pympi-ling
+
+PyInstaller ^
+	--windowed ^
+	--onedir ^
+	--add-data="assets/silero_vad.onnx:assets" ^
+	--add-data="assets/mhubert_asr.onnx:assets" ^
 	app.py
 ```
